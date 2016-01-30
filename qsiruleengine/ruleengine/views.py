@@ -6,7 +6,7 @@ from datetime import datetime
 from django.shortcuts import render
 from rest_framework import viewsets
 from rest_framework.views import APIView
-from django.http import Http404
+from django.http import Http404, HttpResponse
 from django.conf import settings
 from rest_framework.response import Response
 from rest_framework import status
@@ -144,3 +144,20 @@ def getattributes(request, featureurl):
 		fieldname = eachfield.get("name")
 		attrs.append(fieldname)
 	return Response(attrs)
+
+
+def filedownload(request, filename):
+	"""
+	Download a specific csv file
+	"""
+	filepath = settings.DOWNLOADLOC+filename
+	try:
+		f= open(filepath)
+		data = f.read()
+		f.close()
+		response = HttpResponse(data, content_type='text/csv')
+		contentvalue = "attachment; filename=%s" % (filename) 
+		response["Content-Disposition"] = contentvalue
+		return response
+	except :
+		return Response('Filepath not exist', status=status.HTTP_404_NOT_FOUND)
