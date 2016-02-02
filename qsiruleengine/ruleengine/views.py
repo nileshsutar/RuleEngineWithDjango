@@ -11,9 +11,13 @@ from django.conf import settings
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.decorators import api_view
+from celery.decorators import task
 
-from ruleengine.models import Rule
-from ruleengine.serializers import RuleSerializer, FeatureURLsSerializer
+
+from ruleengine.serializers import RuleSerializer, FeatureURLsSerializer, RuleExecutionSummarySerializer
+from ruleengine.models import Rule, RuleExecutionSummary, TaskScheduler
+
+from tasks import executeruleAsync
 
 # Create your views here.
 
@@ -39,6 +43,7 @@ class RuleList(APIView):
 			return Response(serializer.data, status=status.HTTP_201_CREATED)
 		return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+
 class RuleDetail(APIView):
 	"""
 	Get, Update or Delete a specific rule
@@ -50,8 +55,13 @@ class RuleDetail(APIView):
 			raise Http404
 
 	def get(self, request, pk, format=None):
+		import pdb;pdb.set_trace()
+		from celery import registry
+		registry.tasks.register(executerule_async)
 		rule = self.get_object(pk)
 		serializer = RuleSerializer(rule)
+		
+		from djcelery.models import PeriodicTask, CrontabSchedule
 		return Response(serializer.data)
 
 
@@ -60,10 +70,24 @@ def executerule(request, pk):
 	"""
 	Execute a specific rule
 	"""
+	asyncresp = executeruleAsync.delay(pk)
+	asyncresp.wait()
+	if asyncresp.status == "SUCCESS" :
+		status, data = asyncresp.result
+		return Response(data, status)
+	else:
+		return Response({"Status of Task": asyncresp.status})
+
+
+#@task(name="executeruletask")
+def executerule_async(pk):
+	rulestatus = "InProgress"
+	success = False
 	try:
 		rule = Rule.objects.get(pk=pk)
 	except Rule.DoesNotExist:
-		return Response(status=status.HTTP_404_NOT_FOUND)
+		return 404, {"message": "Rule with id '%s' not found" % pk}
+		#return Response({"message": "Rule with id '%s' not found" % pk}, status=404)
 
 	areaurl = rule.area_url
 	polygonurl = os.path.join(areaurl, settings.AREAURLQUERY)
@@ -73,7 +97,15 @@ def executerule(request, pk):
 		response = simplejson.loads(resp)
 		rings = response.get("features")[0].get("geometry").get("rings")
 	except Exception as error:
-		return Response('Invalid JSON for area url- {0}'.format(error.message), status=status.HTTP_400_BAD_REQUEST) 
+		rulestatus = "Failed"
+		message = 'Invalid JSON for area url- {0}'.format(error.message)
+		summary = RuleExecutionSummary(rule_name=rule.rule_name, rule_id=rule.pk, execution_status=rulestatus, \
+					error_message=message)
+		if summary:
+			#serializer.save()
+			return Response({"message" : message}, status=400)
+		else:
+			return Response({"message" : message}, status=400)
 	
 	featureurlsobj = rule.featureurls.all()
 	featureurlobj = featureurlsobj[0]#[featureurlobj.get('feature_url') for featureurlobj in rule.featureurls.values()]
@@ -87,11 +119,14 @@ def executerule(request, pk):
 	try:
 		status, resp = http.request(newFeatureURL, 'GET', headers = settings.HEADERS)
 		resp = simplejson.loads(resp)
-		rulestatus = "InProgress"
+		rulestatus = "Completed"
 		success=True
 	except Exception as error:
-		Response('Invalid JSON for feature url- {0}'.format(error.message), status=status.HTTP_400_BAD_REQUEST)
-	
+		rulestatus = "Failed"
+		message = 'Invalid JSON for feature url- {0}'.format(error.message)
+		status=status.HTTP_400_BAD_REQUEST
+
+	stoptime = datetime.now()	
 	features = resp.get("features", list())
 	feature_attrs = list()
 	featurefields = featureurlobj.featureurlfields.order_by('field_index').values('feature_url_field')
@@ -121,8 +156,26 @@ def executerule(request, pk):
 		for feature_attr in feature_attrs:
 			writer.writerow(feature_attr)
 
-	return Response({"status": "success", "rulename": rule.rule_name, "ruleid": rule.pk})
-	
+	#import pdb;pdb.set_trace()
+	TaskScheduler.schedule_every(executerule, "minutes", 5, 2)	
+
+	try:
+		if success:
+			summary = RuleExecutionSummary(rule_name=rule.rule_name, rule_id=rule.pk, starttime=starttime, \
+								stoptime=stoptime, execution_status=rulestatus, filelocation=fileloc)
+			summary.save()
+			res_dict = {"status": "success", "rulename": rule.rule_name, "ruleid": rule.pk}
+			return 201, res_dict
+			#return Response({"status": "success", "rulename": rule.rule_name, "ruleid": rule.pk}, status=201)
+		else:
+			summary = RuleExecutionSummary(rule_name=rule.rule_name, rule_id=rule.pk, starttime=starttime, \
+								stoptime=stoptime, execution_status=rulestatus, error_message=message)
+			summary.save()
+			return 400, {"message" : message}
+			#return  Response({"message" : message}, status=400)
+	except Exception as error:
+		 return Response({"message" : error}, status=400)
+
 @api_view(['GET'])
 def getattributes(request, featureurl):
 	"""
@@ -161,3 +214,13 @@ def filedownload(request, filename):
 		return response
 	except :
 		return Response('Filepath not exist', status=status.HTTP_404_NOT_FOUND)
+
+
+class RuleExecutionSummaryList(APIView):
+	"""
+	"""
+	def get(self, request, format=None):
+		summary = RuleExecutionSummary.objects.all()
+		serializer = RuleExecutionSummarySerializer(summary, many=True)
+		return Response(serializer.data)
+

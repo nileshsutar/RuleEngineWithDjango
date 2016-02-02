@@ -1,31 +1,27 @@
 
 from rest_framework import serializers
 
-from models import Rule, FeatureURLs, FeatureFields, RuleScheduler
+from models import Rule, FeatureURLs, FeatureFields, RuleScheduler, RuleExecutionSummary
 
 
 
 class FeatureFieldsSerializer(serializers.ModelSerializer):
 	class Meta:
 		model = FeatureFields
-		fields = ('feature_url_field', 'field_index')
+		fields = ('id', 'feature_url_field', 'field_index')
 	
 
 class FeatureURLsSerializer(serializers.ModelSerializer):
 	featureurlfields = FeatureFieldsSerializer(many=True)
 	class Meta:
 		model = FeatureURLs
-		fields = ('feature_url', 'featureurlfields')
+		fields = ('id', 'feature_url', 'featureurlfields')
 
-	#def create(self, validated_data):
-	#	import pdb;pdb.set_trace()
-	#	featureurlfieldsdata = validated_data.pop("featureurlfields")
-	#	feaurefieldsobj = FeatureFields.objects.create(**featureurlfieldsdata)
 
 class RuleSchedulerSerializer(serializers.ModelSerializer):
 	class Meta:
 		model = RuleScheduler
-		fields = ('schedulertime', 'schedulertype')
+		fields = ('id', 'schedulertime', 'schedulertype')
 
 
 class RuleSerializer(serializers.ModelSerializer):
@@ -54,4 +50,21 @@ class RuleSerializer(serializers.ModelSerializer):
 				featurefieldobj = FeatureFields.objects.create(feature_url_field=field, field_index=index)
 				furlobj.featureurlfields.add(featurefieldobj)	
 			rule.featureurls.add(furlobj)
-		return rule		
+		return rule
+
+class RuleExecutionSummarySerializer(serializers.ModelSerializer):
+	rule_name = serializers.CharField(required=True, max_length=30)
+	rule_id = serializers.IntegerField(required=True)
+	starttime = serializers.DateTimeField()
+	stoptime = serializers.DateTimeField()
+	execution_status = serializers.CharField(required=True, max_length=20)
+	filelocation = serializers.CharField(max_length=225)
+	error_message = serializers.CharField(max_length=225)
+
+	class Meta:
+		model = RuleExecutionSummary
+		fields = ("id", "rule_name", "rule_id", "starttime", "stoptime", "execution_status", "filelocation", "error_message")
+
+	def create(self, validated_data):
+		import pdb;pdb.set_trace()
+		summary = RuleExecutionSummary.objects.create(**validated_data)

@@ -31,6 +31,7 @@ urlpatterns = [
     #url(r'^', include(router.urls)),	
     url(r'^rules/$', views.RuleList.as_view()),
     url(r'^rules/(?P<pk>[0-9]+)/$', views.RuleDetail.as_view()),	
+    url(r'^ruleexecutionhistory/$', views.RuleExecutionSummaryList.as_view()),	
     url(r'^executerule/(?P<pk>[0-9]+)$', views.executerule),
     url(r'^getattrs(?P<featureurl>[a-zA-Z0-9_.-/:?=#]*)', views.getattributes, name='getattibutes'),
     url(r'^download/(?P<filename>[\w.]{0,256})$', views.filedownload)		
