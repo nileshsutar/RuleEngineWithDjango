@@ -1,2 +1,2 @@
-# RuleEngineWithDjango
-RuleEngine using Django, MySQL, Celery
+# ScriptRunnerWithDjango
+ScriptRunner using Django, MySQL, Celery
